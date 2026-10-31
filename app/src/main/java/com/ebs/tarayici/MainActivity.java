@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.*;
 import androidx.annotation.Nullable;
@@ -21,7 +22,7 @@ import java.io.*;
 import java.util.*;
 
 public class MainActivity extends ComponentActivity {
-    private static final int CAMERA=11, PICK=12, SAVE=13;
+    private static final int CAMERA=11, PICK=12, SAVE=13, SERIES=14;
     private final ArrayList<String> pages=new ArrayList<>();
     private LinearLayout list, root;
     private TextView countLabel, status;
@@ -36,7 +37,7 @@ public class MainActivity extends ComponentActivity {
         super.onCreate(b); getWindow().setStatusBarColor(navy);getWindow().setNavigationBarColor(navy);
         restore(); render();
         String token=getPreferences(0).getString("work",null);
-        if(token!=null) {try{watch(UUID.fromString(token));}catch(Exception ignored){}}
+        if(token!=null) {try{currentWork=UUID.fromString(token);watch(currentWork);}catch(Exception ignored){}}
     }
     private GradientDrawable background(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
     private TextView text(String s,int size,int color, boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextColor(color);t.setTextSize(size);t.setGravity(Gravity.CENTER_VERTICAL);if(bold)t.setTypeface(null,Typeface.BOLD);return t;}
@@ -47,19 +48,182 @@ public class MainActivity extends ComponentActivity {
         b.setElevation(dp(4));b.setPadding(dp(12),0,dp(12),0);b.setOnClickListener(v->{b.animate().scaleX(.96f).scaleY(.96f).setDuration(90).withEndAction(()->{b.animate().scaleX(1).scaleY(1).setDuration(140);action.run();});});return b;
     }
     private void render(){
-        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xffF2F5FA);
-        root=panel();root.setPadding(dp(18),dp(20),dp(18),dp(30));scroll.addView(root);setContentView(scroll);
-        TextView banner=text("▣  EBS PDF TARAYICI",24,Color.WHITE,true);banner.setPadding(dp(20),dp(18),dp(20),dp(18));banner.setBackground(background(navy,20));root.addView(banner,lp(-1,80,0));
-        TextView subtitle=text("Fotoğraf çek • Sayfaları sırala • Tek PDF oluştur",13,0xff53627C,false);subtitle.setPadding(dp(3),dp(8),0,0);root.addView(subtitle);
-        LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.HORIZONTAL);root.addView(actions,lp(-1,66,20));
-        TextView photo=button("📷  FOTOĞRAF ÇEK",blue,this::takePhoto);LinearLayout.LayoutParams half=new LinearLayout.LayoutParams(0,dp(58),1);half.rightMargin=dp(6);actions.addView(photo,half);
-        TextView gallery=button("＋  GALERİDEN EKLE",teal,this::pickImages);LinearLayout.LayoutParams half2=new LinearLayout.LayoutParams(0,dp(58),1);half2.leftMargin=dp(6);actions.addView(gallery,half2);
-        TextView series=button("📷  SERİ ÇEKİM — ARKA ARKAYA SAYFA EKLE",0xff6C42B8,this::startSeries);root.addView(series,lp(-1,56,9));
-        countLabel=text("SAYFALAR ("+pages.size()+")",17,navy,true);root.addView(countLabel,lp(-1,45,16));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xffF1F5FB);
+        root=panel();root.setPadding(dp(16),dp(18),dp(16),dp(36));scroll.addView(root);setContentView(scroll);
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(18),dp(12),dp(12),dp(12));header.setBackground(background(navy,22));root.addView(header,lp(-1,76,0));
+        TextView brand=text("▣  EBS PDF",22,Color.WHITE,true);header.addView(brand,new LinearLayout.LayoutParams(0,-1,1));
+        TextView menu=button("☰  MENÜ",0xff344563,this::showMenu);header.addView(menu,new LinearLayout.LayoutParams(dp(105),dp(48)));
+        TextView subtitle=text("Belgelerini tara, düzenle ve PDF oluştur",14,0xff53627C,false);subtitle.setPadding(dp(4),dp(12),0,0);root.addView(subtitle);
+        TextView series=button("◎  SERİ TARAMAYI BAŞLAT",blue,this::startSeries);root.addView(series,lp(-1,70,24));
+        TextView create=button("▤  PDF OLUŞTUR",teal,this::createPdf);root.addView(create,lp(-1,62,12));
+        TextView save=button("⇩  PDF'İ KAYDET",navy,this::savePdf);root.addView(save,lp(-1,58,12));
+        TextView clear=button("⌫  TÜM SAYFALARI TEMİZLE",0xffB83F51,this::confirmClear);root.addView(clear,lp(-1,50,12));
+        countLabel=text("SAYFALAR ("+pages.size()+")",18,navy,true);root.addView(countLabel,lp(-1,48,22));
+        TextView desc=text("Tam ekran incelemek için dokunun; sağa/sola kaydırarak gezinin.",13,0xff69768E,false);root.addView(desc,lp(-1,36,0));
         list=panel();root.addView(list);drawPages();
-        TextView create=button("▤  SAYFALARI PDF YAP",blue,this::createPdf);root.addView(create,lp(-1,58,20));
-        TextView save=button("⇩  OLUŞTURULAN PDF'İ KAYDET",navy,this::savePdf);root.addView(save,lp(-1,55,12));
-        status=text("Taranan sayfalar telefonda saklanır. Arama gelirse kaldığınız yerden devam edebilirsiniz.",13,0xff46546E,false);status.setPadding(dp(4),dp(14),dp(4),dp(8));root.addView(status);
+        status=text("Çektiğiniz sayfalar cihazda saklanır.",13,0xff46546E,false);status.setPadding(dp(4),dp(18),dp(4),dp(8));root.addView(status);
+    }
+    private void showMenu(){
+        final String[] items={"📷  Tek fotoğraf çek", "＋  Galeriden fotoğraf ekle", "▣  Seri tarama", "ℹ  Uygulama hakkında"};
+        new android.app.AlertDialog.Builder(this).setTitle("EBS • Diğer işlemler").setItems(items,(dialog,which)->{
+            if(which==0)takePhoto();else if(which==1)pickImages();else if(which==2)startSeries();else showAbout();
+        }).show();
+    }
+    private void confirmClear(){if(currentWork!=null){note("Önce PDF oluşturma işleminin bitmesini bekleyin.");return;}if(pages.isEmpty()){note("Temizlenecek sayfa bulunamadı.");return;}
+        new android.app.AlertDialog.Builder(this).setTitle("Tüm sayfalar silinsin mi?")
+            .setMessage(pages.size()+" sayfa kalıcı olarak silinecek. Kaydedilmiş PDF dosyaları etkilenmez.")
+            .setNegativeButton("Vazgeç",null).setPositiveButton("Hepsini sil",(d,w)->clearPages()).show();
+    }
+    private void clearPages(){if(currentWork!=null){note("PDF oluşturma sürerken sayfalar silinemez.");return;}for(String path:pages){try{new File(path).delete();}catch(Exception ignored){}}
+        pages.clear();persist();drawPages();note("Tüm taranmış sayfalar temizlendi.");}
+    private Bitmap loadPreview(int position) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(pages.get(position), bounds);
+        int sample = 1;
+        while (bounds.outWidth / sample > 2400 || bounds.outHeight / sample > 2400) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        return BitmapFactory.decodeFile(pages.get(position), options);
+    }
+    private void previewPage(int index) {
+        if (index < 0 || index >= pages.size()) return;
+        final android.app.Dialog modal = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(0xff090E17);
+        ImageView photo = new ImageView(this);
+        photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        frame.addView(photo, new FrameLayout.LayoutParams(-1, -1));
+        final int[] position = {index};
+        TextView caption = text("", 16, Color.WHITE, true);
+        caption.setGravity(Gravity.CENTER);
+        caption.setBackground(background(0xcc15253c, 16));
+        TextView back = text("❮", 26, Color.WHITE, true);
+        TextView forward = text("❯", 26, Color.WHITE, true);
+        back.setGravity(Gravity.CENTER);
+        forward.setGravity(Gravity.CENTER);
+        back.setBackground(background(0x9915253c, 18));
+        forward.setBackground(background(0x9915253c, 18));
+        Runnable update = () -> {
+            // Release previous bitmap when switching pages.
+            android.graphics.drawable.Drawable drawable = photo.getDrawable();
+            photo.setImageDrawable(null);
+            if (drawable instanceof android.graphics.drawable.BitmapDrawable) {
+                Bitmap previous = ((android.graphics.drawable.BitmapDrawable)drawable).getBitmap();
+                if (previous != null && !previous.isRecycled()) previous.recycle();
+            }
+            Bitmap bitmap = loadPreview(position[0]);
+            if (bitmap != null) photo.setImageBitmap(bitmap);
+            caption.setText("Sayfa " + (position[0] + 1) + " / " + pages.size() + "    •    Sağa / sola kaydır");
+            back.setVisibility(position[0] == 0 ? View.INVISIBLE : View.VISIBLE);
+            forward.setVisibility(position[0] == pages.size() - 1 ? View.INVISIBLE : View.VISIBLE);
+        };
+        back.setOnClickListener(v -> { if (position[0] > 0) { position[0]--; update.run(); } });
+        forward.setOnClickListener(v -> { if (position[0] < pages.size() - 1) { position[0]++; update.run(); } });
+        final float[] down = new float[2];
+        photo.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                down[0] = event.getX(); down[1] = event.getY(); return true;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                float dx = event.getX() - down[0];
+                float dy = event.getY() - down[1];
+                if (Math.abs(dx) > dp(65) && Math.abs(dx) > Math.abs(dy) * 1.25f) {
+                    int next = position[0] + (dx < 0 ? 1 : -1);
+                    if (next >= 0 && next < pages.size()) {
+                        position[0] = next;
+                        photo.animate().alpha(0.45f).setDuration(85).withEndAction(() -> {
+                            update.run(); photo.animate().alpha(1f).setDuration(130).start();
+                        }).start();
+                    }
+                }
+                return true;
+            }
+            return true;
+        });
+        FrameLayout.LayoutParams prevParams = new FrameLayout.LayoutParams(dp(47), dp(70), Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        prevParams.leftMargin = dp(9); frame.addView(back, prevParams);
+        FrameLayout.LayoutParams nextParams = new FrameLayout.LayoutParams(dp(47), dp(70), Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        nextParams.rightMargin = dp(9); frame.addView(forward, nextParams);
+        FrameLayout.LayoutParams captionParams = new FrameLayout.LayoutParams(-1, dp(55), Gravity.BOTTOM);
+        captionParams.setMargins(dp(12), 0, dp(12), dp(22)); frame.addView(caption, captionParams);
+        TextView close = button("✕  KAPAT", navy, modal::dismiss);
+        FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dp(116), dp(49), Gravity.RIGHT | Gravity.TOP);
+        closeParams.setMargins(0, dp(24), dp(14), 0); frame.addView(close, closeParams);
+        modal.setContentView(frame);
+        modal.setOnDismissListener(d -> {
+            android.graphics.drawable.Drawable drawable = photo.getDrawable();
+            photo.setImageDrawable(null);
+            if (drawable instanceof android.graphics.drawable.BitmapDrawable) {
+                Bitmap bmp = ((android.graphics.drawable.BitmapDrawable)drawable).getBitmap();
+                if (bmp != null && !bmp.isRecycled()) bmp.recycle();
+            }
+        });
+        update.run();
+        modal.show();
+    }
+    private void openSocial(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE));
+        } catch (Exception e) { note("Bağlantı açılamadı: " + e.getMessage()); }
+    }
+    private void aboutSocial(LinearLayout holder, String symbol, String name, String description, String url, int color) {
+        LinearLayout item = new LinearLayout(this);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(12), dp(12), dp(12), dp(12));
+        item.setBackground(background(Color.WHITE, 17));
+        item.setElevation(dp(2));
+        holder.addView(item, lp(-1, 69, 9));
+        TextView icon = text(symbol, 21, Color.WHITE, true);
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(background(color, 14));
+        item.addView(icon, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        LinearLayout labels = panel(); labels.setPadding(dp(12), 0, 0, 0);
+        item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
+        labels.addView(text(name, 15, navy, true));
+        labels.addView(text(description, 12, 0xff64748b, false));
+        TextView arrow = text("↗", 24, blue, true); item.addView(arrow);
+        item.setOnClickListener(v -> openSocial(url));
+    }
+    private void showAbout() {
+        android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true); scroll.setBackgroundColor(0xffF1F5FB);
+        LinearLayout content = panel();
+        content.setPadding(dp(17), dp(22), dp(17), dp(32)); scroll.addView(content);
+        LinearLayout header = panel(); header.setPadding(dp(22), dp(26), dp(22), dp(24));
+        header.setBackground(background(navy, 24)); content.addView(header, lp(-1, -2, 0));
+        TextView close = text("✕   Kapat", 14, Color.WHITE, true);
+        close.setGravity(Gravity.RIGHT); close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close, lp(-1, 38, 0));
+        TextView logo = text("▣   EBS PDF TARAYICI", 24, Color.WHITE, true);
+        header.addView(logo, lp(-1, -2, 14));
+        TextView version = text("Sürüm 2.0  •  Android belge tarama ve PDF", 13, 0xffB9D4FF, false);
+        header.addView(version, lp(-1, -2, 7));
+        TextView summary = text("Belgelerinizi kolayca tarayın, sayfaları düzenleyin ve tek bir PDF dosyasında birleştirin.", 15, Color.WHITE, false);
+        summary.setLineSpacing(dp(4), 1f); header.addView(summary, lp(-1, -2, 19));
+        TextView creatorTitle = text("GELİŞTİRİCİ", 12, 0xff64748B, true);
+        content.addView(creatorTitle, lp(-1, 30, 23));
+        LinearLayout developer = panel();developer.setPadding(dp(19), dp(18), dp(19), dp(18));
+        developer.setBackground(background(Color.WHITE, 19));content.addView(developer);
+        developer.addView(text("Ebubekir Bastama", 21, navy, true));
+        developer.addView(text("Yazılım geliştirici • EBS PDF Tarayıcı", 14, 0xff64748b, false), lp(-1, -2, 8));
+        TextView featuresTitle = text("UYGULAMA ÖZELLİKLERİ", 12, 0xff64748B, true);
+        content.addView(featuresTitle, lp(-1, 30, 20));
+        LinearLayout features = panel(); features.setPadding(dp(18), dp(16), dp(18), dp(16));
+        features.setBackground(background(Color.WHITE, 18)); content.addView(features);
+        String[] lines = {"✓  Kesintisiz seri belge çekimi", "✓  Galeriden çoklu fotoğraf ekleme", "✓  Tam ekran ve kaydırmalı sayfa inceleme", "✓  Sayfa sırasını değiştirme ve silme", "✓  Birden çok sayfayı PDF olarak oluşturma", "✓  Oluşturulan PDF dosyasını cihaza kaydetme"};
+        for (String line : lines) { TextView t = text(line, 14, 0xff334155, false);t.setPadding(0, dp(7), 0, dp(7));features.addView(t); }
+        TextView follow = text("SOSYAL MEDYA VE GELİŞTİRİCİ BAĞLANTILARI", 12, 0xff64748B, true);
+        content.addView(follow, lp(-1, 36, 20));
+        aboutSocial(content, "𝕏", "X (Twitter)", "@ebubekirstt", "https://x.com/ebubekirstt", 0xff171717);
+        aboutSocial(content, "f", "Facebook", "Ebubekir Bastama", "https://www.facebook.com/ebubekirbastama", 0xff1877F2);
+        aboutSocial(content, "in", "LinkedIn", "Profesyonel profil", "https://www.linkedin.com/in/ebubekirbastama/", 0xff0A66C2);
+        aboutSocial(content, "▶", "YouTube", "Ebubekir Yazılım", "https://www.youtube.com/@ebubekiryazilim", 0xffE52335);
+        aboutSocial(content, "⌘", "GitHub", "Açık kaynak projeler", "https://github.com/ebubekirbastama", 0xff24292F);
+        TextView foot = text("EBS PDF Tarayıcı  •  Ebubekir Bastama", 12, 0xff64748b, false);
+        foot.setGravity(Gravity.CENTER); content.addView(foot, lp(-1, 55, 13));
+        dialog.setContentView(scroll); dialog.show();
     }
     private void drawPages(){
         list.removeAllViews();countLabel.setText("SAYFALAR ("+pages.size()+")");
@@ -69,21 +233,18 @@ public class MainActivity extends ComponentActivity {
             LinearLayout item=new LinearLayout(this);item.setGravity(Gravity.CENTER_VERTICAL);item.setPadding(dp(9),dp(8),dp(8),dp(8));item.setBackground(background(Color.WHITE,16));item.setElevation(dp(1));list.addView(item,lp(-1,88,8));
             ImageView thumb=new ImageView(this);thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
             BitmapFactory.Options opt=new BitmapFactory.Options();opt.inSampleSize=8;Bitmap bm=BitmapFactory.decodeFile(path,opt);if(bm!=null)thumb.setImageBitmap(bm);
-            item.addView(thumb,new LinearLayout.LayoutParams(dp(62),dp(70)));
-            TextView label=text("  Sayfa "+(i+1),15,navy,true);item.addView(label,new LinearLayout.LayoutParams(0,-1,1));
+            item.addView(thumb,new LinearLayout.LayoutParams(dp(62),dp(70)));thumb.setOnClickListener(v->previewPage(pos));
+            TextView label=text("  Sayfa "+(i+1),15,navy,true);item.addView(label,new LinearLayout.LayoutParams(0,-1,1));label.setOnClickListener(v->previewPage(pos));
             LinearLayout buttons=panel();item.addView(buttons);
             TextView up=text("▲",20,blue,true);up.setGravity(Gravity.CENTER);up.setOnClickListener(v->move(pos,-1));buttons.addView(up,new LinearLayout.LayoutParams(dp(36),dp(34)));
             TextView down=text("▼",20,blue,true);down.setGravity(Gravity.CENTER);down.setOnClickListener(v->move(pos,1));buttons.addView(down,new LinearLayout.LayoutParams(dp(36),dp(34)));
-            TextView del=text("✕",20,0xffD84552,true);del.setGravity(Gravity.CENTER);del.setOnClickListener(v->{pages.remove(pos);persist();drawPages();});item.addView(del,new LinearLayout.LayoutParams(dp(36),-1));
+            TextView del=text("✕",20,0xffD84552,true);del.setGravity(Gravity.CENTER);del.setOnClickListener(v->{String removed=pages.remove(pos);new File(removed).delete();persist();drawPages();});item.addView(del,new LinearLayout.LayoutParams(dp(36),-1));
         }
     }
     private void move(int at,int delta){int to=at+delta;if(to<0||to>=pages.size())return;Collections.swap(pages,at,to);persist();drawPages();}
     private File pageDir(){File f=new File(getFilesDir(),"pages");f.mkdirs();return f;}
     private String nextName(){return "page_"+System.currentTimeMillis()+"_"+UUID.randomUUID().toString().substring(0,7)+".jpg";}
-    private void startSeries(){
-        continuousCapture=true;
-        takePhoto();
-    }
+    private void startSeries(){startActivityForResult(new Intent(this,CameraActivity.class),SERIES);}
     private void takePhoto(){
         try{File f=new File(pageDir(),nextName());pendingFile=f.getAbsolutePath();getPreferences(0).edit().putString("pending",pendingFile).apply();
             pendingCamera=FileProvider.getUriForFile(this,getPackageName()+".provider",f);
@@ -113,6 +274,9 @@ public class MainActivity extends ComponentActivity {
                 }
             } else {continuousCapture=false;note("Fotoğraf kaydedilemedi, önceki sayfalar korundu.");}
         }
+        if(req==SERIES && data!=null){ArrayList<String> captured=data.getStringArrayListExtra("captured");
+            if(captured!=null){for(String path:captured)if(new File(path).length()>0&&!pages.contains(path))pages.add(path);
+                persist();drawPages();note(captured.size()+" sayfa eklendi. PDF oluşturmaya hazır.");}}
         if(req==PICK && data!=null){int added=0;
             try{if(data.getClipData()!=null){for(int j=0;j<data.getClipData().getItemCount();j++){importUri(data.getClipData().getItemAt(j).getUri());added++;}}
                 else if(data.getData()!=null){importUri(data.getData());added++;}
@@ -140,8 +304,8 @@ public class MainActivity extends ComponentActivity {
         WorkManager.getInstance(this).enqueue(request);watch(currentWork);note("PDF oluşturma arka planda başladı. Arama gelirse işlem korunur.");
     }
     private void watch(UUID id){WorkManager.getInstance(this).getWorkInfoByIdLiveData(id).observe(this,info->{if(info==null)return;
-        if(info.getState()==WorkInfo.State.SUCCEEDED){readyPdf=info.getOutputData().getString("pdf");getPreferences(0).edit().putString("pdf",readyPdf).remove("work").apply();note("PDF hazır! Kaydet düğmesine dokunun.");}
-        else if(info.getState()==WorkInfo.State.FAILED){getPreferences(0).edit().remove("work").apply();note("PDF hatası: "+info.getOutputData().getString("error"));}
+        if(info.getState()==WorkInfo.State.SUCCEEDED){currentWork=null;readyPdf=info.getOutputData().getString("pdf");getPreferences(0).edit().putString("pdf",readyPdf).remove("work").apply();note("PDF hazır! Kaydedebilir veya sayfaları topluca silebilirsiniz.");}
+        else if(info.getState()==WorkInfo.State.FAILED){currentWork=null;getPreferences(0).edit().remove("work").apply();note("PDF hatası: "+info.getOutputData().getString("error"));}
         else if(info.getState()==WorkInfo.State.RUNNING){int done=info.getProgress().getInt("done",0);int total=info.getProgress().getInt("total",pages.size());note("PDF hazırlanıyor: "+done+"/"+total+" sayfa");}
     });}
     private void savePdf(){if(readyPdf==null||!new File(readyPdf).isFile()){note("Önce PDF oluşturun.");return;}
